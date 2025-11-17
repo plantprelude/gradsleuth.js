@@ -1,0 +1,41 @@
+"""Configuration package for the biology research matching platform."""
+
+from .settings import (
+    get_config,
+    APIConfig,
+    DatabaseConfig,
+    ScraperConfig,
+    LoggingConfig,
+    CacheConfig,
+    PubMedConfig,
+    GrantConfig,
+    FacultyConfig,
+    PerformanceConfig,
+    BASE_DIR,
+    DATA_DIR,
+    RAW_DATA_DIR,
+    PROCESSED_DATA_DIR,
+    CACHE_DIR,
+    DEBUG,
+    TESTING,
+)
+
+__all__ = [
+    'get_config',
+    'APIConfig',
+    'DatabaseConfig',
+    'ScraperConfig',
+    'LoggingConfig',
+    'CacheConfig',
+    'PubMedConfig',
+    'GrantConfig',
+    'FacultyConfig',
+    'PerformanceConfig',
+    'BASE_DIR',
+    'DATA_DIR',
+    'RAW_DATA_DIR',
+    'PROCESSED_DATA_DIR',
+    'CACHE_DIR',
+    'DEBUG',
+    'TESTING',
+]
