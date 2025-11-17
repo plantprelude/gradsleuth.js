@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bio-match-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=${API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_USE_MOCK=${USE_MOCK:-true}
+      - NEXT_PUBLIC_FEATURE_ADVANCED_SEARCH=true
+      - NEXT_PUBLIC_FEATURE_AI_RECOMMENDATIONS=true
+      - NEXT_PUBLIC_FEATURE_COLLAB_NETWORK=true
+    restart: unless-stopped
+    networks:
+      - bio-match-network
+
+  # Development service
+  frontend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: bio-match-frontend-dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=${API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_USE_MOCK=${USE_MOCK:-true}
+    volumes:
+      - ./src:/app/src
+      - ./public:/app/public
+      - /app/node_modules
+    restart: unless-stopped
+    profiles:
+      - dev
+
+networks:
+  bio-match-network:
+    driver: bridge
