@@ -109,6 +109,44 @@ def get_vector_store():
     return _vector_store
 
 
+def get_search_engine():
+    """Get or initialize semantic search engine"""
+    global _search_engine
+    if _search_engine is None:
+        from ..search.semantic_search import SemanticSearchEngine
+        from ..search.query_processor import QueryProcessor
+        from ..search.result_ranker import ResultRanker
+
+        embedder = get_embedding_generator()
+        vector_store = get_vector_store()
+
+        query_processor = QueryProcessor(use_ner=False)  # Disable NER for faster processing
+        result_ranker = ResultRanker()
+
+        _search_engine = SemanticSearchEngine(
+            embedding_generator=embedder,
+            vector_store=vector_store,
+            query_processor=query_processor,
+            result_ranker=result_ranker
+        )
+        logger.info("Initialized SemanticSearchEngine")
+    return _search_engine
+
+
+def get_matcher():
+    """Get or initialize multi-factor matcher"""
+    global _matcher
+    if _matcher is None:
+        from ..matching.multi_factor_scorer import MultiFactorMatcher
+        from ..matching.similarity_calculator import SimilarityCalculator
+
+        embedder = get_embedding_generator()
+        similarity_calc = SimilarityCalculator(embedding_generator=embedder)
+        _matcher = MultiFactorMatcher(similarity_calculator=similarity_calc)
+        logger.info("Initialized MultiFactorMatcher")
+    return _matcher
+
+
 # Health check endpoint
 @app.get("/api/v1/health")
 async def health_check():
@@ -140,75 +178,61 @@ async def get_metrics():
 @app.post("/api/v1/search/semantic", response_model=SearchResponse)
 async def semantic_search(request: SearchRequest):
     """
-    Primary semantic search endpoint
+    Intelligent semantic search endpoint with query understanding and multi-factor ranking
 
-    Performs semantic search across faculty profiles, publications, grants, or labs
-    using state-of-the-art biology-specific embeddings.
+    Uses the new SemanticSearchEngine with:
+    - Query processing (entity extraction, intent detection, expansion)
+    - Multi-factor ranking (research productivity, funding, recency, h-index)
+    - Result diversification
+    - Explainable rankings
 
     Args:
         request: Search request parameters
 
     Returns:
-        Search results with scores and optional explanations
+        Search results with intelligent ranking and optional explanations
     """
     try:
         logger.info(f"Search request: query='{request.query}', mode={request.mode}")
 
-        # Get embedding for query
-        generator = get_embedding_generator()
-        query_embedding = generator.generate_embedding(request.query)
+        # Get semantic search engine
+        search_engine = get_search_engine()
 
-        # Get vector store
-        store = get_vector_store()
-
-        # Determine index name based on mode
-        index_name = f"{request.mode}_embeddings"
-
-        # Check if index exists
-        if index_name not in store.list_indices():
-            logger.warning(f"Index '{index_name}' not found, creating empty index")
-            store.create_index(index_name, dimension=768, metric='cosine')
-
-        # Perform search
-        results = store.search(
-            query_embedding,
-            index_name=index_name,
-            k=request.limit,
-            filters=request.filters
+        # Use intelligent search
+        results = search_engine.search(
+            query=request.query,
+            search_mode=request.mode,
+            filters=request.filters,
+            limit=request.limit,
+            offset=request.offset,
+            explain=request.explain,
+            diversity_factor=0.3
         )
 
-        # Format results
+        # Convert SearchResults to API response
         faculty_results = []
-        for result in results:
-            metadata = result['metadata']
+        for result in results.results:
+            metadata = result.get('metadata', {})
             faculty_results.append(
                 FacultyResult(
                     id=result['id'],
                     name=metadata.get('name', 'Unknown'),
                     institution=metadata.get('institution', 'Unknown'),
                     department=metadata.get('department', 'Unknown'),
-                    research_summary=metadata.get('research_summary', ''),
-                    match_score=result['score'],
-                    explanation=f"Matched based on semantic similarity: {result['score']:.3f}" if request.explain else None
+                    research_summary=metadata.get('research_summary', metadata.get('research_interests', '')),
+                    match_score=result.get('final_score', result.get('score', 0)),
+                    explanation=result.get('explanation') if request.explain else None
                 )
             )
 
-        # Build response
         response = SearchResponse(
             results=faculty_results,
-            total=len(results),
-            facets={
-                "institutions": {},
-                "departments": {},
-                "research_areas": {}
-            } if request.explain else None,
-            query_interpretation={
-                "original_query": request.query,
-                "embedding_model": "pubmedbert"
-            } if request.explain else None
+            total=results.total_count,
+            facets=results.facets,
+            query_interpretation=results.query_interpretation
         )
 
-        logger.info(f"Returning {len(faculty_results)} results")
+        logger.info(f"Returning {len(faculty_results)} intelligently ranked results")
         return response
 
     except Exception as e:
@@ -242,97 +266,100 @@ async def batch_search(requests: List[SearchRequest]):
 @app.post("/api/v1/match/calculate", response_model=MatchResponse)
 async def calculate_match(request: MatchRequest):
     """
-    Calculate matches for a student profile
+    Calculate comprehensive faculty-student matches using multi-factor scoring
 
-    Uses multi-factor scoring to find best faculty matches based on:
-    - Research similarity
-    - Funding status
-    - Productivity metrics
-    - Career development potential
+    Uses the new MultiFactorMatcher with:
+    - Research alignment (semantic similarity + topic/technique overlap)
+    - Funding stability (active grants, runway, diversity)
+    - Productivity compatibility (publication frequency, h-index)
+    - Technique match (experimental methods overlap)
+    - Lab environment (size, mentorship, accepting students)
+    - Career development alignment (student goals vs faculty trajectory)
 
     Args:
         request: Match request with student profile
 
     Returns:
-        Ranked list of faculty matches with explanations
+        Ranked list of faculty matches with detailed explanations and recommendations
     """
     try:
-        logger.info("Calculating matches for student profile")
+        logger.info("Calculating comprehensive matches for student profile")
 
-        # Generate embedding for student profile
-        generator = get_embedding_generator()
+        # Get search engine to find candidate faculty
+        search_engine = get_search_engine()
 
-        # Combine student interests into single text
+        # Convert student profile to search query
         student_text = request.student_profile.get('research_interests', '')
         if 'techniques' in request.student_profile:
-            student_text += " " + " ".join(request.student_profile['techniques'])
+            student_text += " " + " ".join(request.student_profile.get('techniques', []))
 
-        student_embedding = generator.generate_embedding(student_text)
-
-        # Search for similar faculty
-        store = get_vector_store()
-        index_name = "faculty_embeddings"
-
-        if index_name not in store.list_indices():
-            store.create_index(index_name, dimension=768)
-
-        search_results = store.search(
-            student_embedding,
-            index_name=index_name,
-            k=request.top_k
+        # Get candidate faculty (search more to ensure good matches)
+        candidate_results = search_engine.search(
+            query=student_text,
+            search_mode='faculty',
+            filters=None,
+            limit=min(request.top_k * 3, 50),  # Get 3x candidates for better matching
+            explain=False
         )
 
-        # Build match results
+        # Get matcher
+        matcher = get_matcher()
+
+        # Calculate match scores for each candidate
         matches = []
-        for i, result in enumerate(search_results):
-            metadata = result['metadata']
+        for result in candidate_results.results:
+            faculty_profile = result.get('metadata', {})
+            faculty_profile['id'] = result.get('id')
 
-            # Calculate component scores (simplified)
-            component_scores = {
-                'research_alignment': result['score'],
-                'funding_stability': 0.85,
-                'productivity': 0.80,
-                'lab_culture_fit': 0.75,
-                'career_development': 0.90
-            }
+            # Calculate comprehensive match score
+            match_score = matcher.calculate_match_score(
+                student_profile=request.student_profile,
+                faculty_profile=faculty_profile,
+                explain=True
+            )
 
-            # Overall score
-            overall_score = np.mean(list(component_scores.values()))
+            matches.append({
+                'faculty_id': result.get('id'),
+                'faculty_name': faculty_profile.get('name', 'Unknown'),
+                'match_score': match_score
+            })
 
-            # Generate explanation for top results
-            explanation = None
-            if i < request.explain_top_n:
-                explanation = f"Strong research alignment with similarity score of {result['score']:.3f}. Faculty has active funding and strong publication record."
+        # Sort by overall score
+        matches.sort(key=lambda x: x['match_score'].overall_score, reverse=True)
 
-            matches.append(
+        # Take top K
+        top_matches = matches[:request.top_k]
+
+        # Build response
+        match_results = []
+        for i, match in enumerate(top_matches):
+            score = match['match_score']
+
+            # Add explanation for top N
+            explanation = score.explanation if i < request.explain_top_n else None
+
+            match_results.append(
                 MatchResult(
-                    faculty_id=result['id'],
-                    faculty_name=metadata.get('name', 'Unknown'),
-                    overall_score=overall_score,
-                    component_scores=component_scores,
+                    faculty_id=match['faculty_id'],
+                    faculty_name=match['faculty_name'],
+                    overall_score=score.overall_score,
+                    component_scores=score.component_scores,
                     explanation=explanation,
-                    strengths=[
-                        "High research similarity",
-                        "Active funding",
-                        "Strong mentorship record"
-                    ],
-                    considerations=[
-                        "Lab may be large",
-                        "Competitive application process"
-                    ]
+                    strengths=score.strengths,
+                    considerations=score.considerations
                 )
             )
 
         response = MatchResponse(
-            matches=matches,
+            matches=match_results,
             student_profile_summary={
-                "research_areas": ["Molecular Biology", "Genetics"],
+                "research_areas": request.student_profile.get('topics', []),
                 "techniques": request.student_profile.get('techniques', []),
                 "career_goals": request.student_profile.get('career_goals', '')
             }
         )
 
-        logger.info(f"Returning {len(matches)} matches")
+        logger.info(f"Returning {len(match_results)} comprehensive matches")
         return response
 
     except Exception as e:
