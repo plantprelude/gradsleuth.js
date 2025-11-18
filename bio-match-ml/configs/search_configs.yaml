@@ -1,0 +1,326 @@
+# Search Configuration for BioMatch Platform
+
+search:
+  default_limit: 20
+  max_limit: 100
+  min_similarity_threshold: 0.65
+  use_caching: true
+  cache_ttl: 3600  # 1 hour
+  enable_query_expansion: true
+  enable_spell_correction: true
+
+  # Search modes
+  modes:
+    faculty:
+      index_name: "faculty_profiles"
+      boost_factors:
+        research_summary: 2.0
+        recent_publications: 1.5
+        active_grants: 1.3
+        techniques: 1.2
+
+    publications:
+      index_name: "publications"
+      boost_factors:
+        title: 2.5
+        abstract: 2.0
+        keywords: 1.5
+        mesh_terms: 1.3
+
+    grants:
+      index_name: "grants"
+      boost_factors:
+        title: 2.0
+        abstract: 2.5
+        pi_expertise: 1.5
+
+    labs:
+      index_name: "research_labs"
+      boost_factors:
+        research_focus: 2.0
+        lab_techniques: 1.8
+        publications: 1.3
+
+  # Hybrid search configuration
+  hybrid:
+    enabled: true
+    vector_weight: 0.7
+    keyword_weight: 0.3
+    reranking: true
+    reranking_model: "cross-encoder"
+
+  # Query processing
+  query_processing:
+    min_query_length: 2
+    max_query_length: 500
+    remove_stopwords: false  # Keep scientific stopwords
+    stemming: true
+    lemmatization: false
+    expand_acronyms: true
+
+    # Scientific query expansion
+    expansion:
+      use_mesh_synonyms: true
+      use_gene_aliases: true
+      use_protein_variants: true
+      max_expansions_per_term: 5
+
+  # Result ranking
+  ranking:
+    algorithm: "multi_factor"  # Options: similarity, bm25, multi_factor, learned
+
+    # Ranking weights for multi_factor
+    weights:
+      semantic_similarity: 0.35
+      keyword_match: 0.15
+      research_productivity: 0.15
+      funding_status: 0.10
+      recency: 0.10
+      collaboration_potential: 0.08
+      h_index: 0.05
+      diversity: 0.02
+
+    # Diversity settings
+    diversity:
+      enabled: true
+      diversity_factor: 0.3
+      max_results_per_institution: 5
+      ensure_career_stage_diversity: true
+
+    # Quality thresholds
+    quality_filters:
+      min_h_index: 0
+      min_publications: 0
+      min_citations: 0
+      require_active_funding: false
+
+  # Faceting configuration
+  facets:
+    enabled: true
+    facet_fields:
+      - institutions
+      - departments
+      - research_areas
+      - techniques
+      - organisms
+      - funding_agencies
+      - career_stage
+      - accepting_students
+    max_facet_values: 20
+    min_facet_count: 1
+
+matching:
+  # Match scoring weights
+  weights:
+    research_similarity: 0.35
+    funding_status: 0.20
+    productivity: 0.15
+    recency: 0.15
+    collaboration_potential: 0.10
+    diversity: 0.05
+
+  # Minimum thresholds
+  thresholds:
+    overall_score: 0.60
+    research_similarity: 0.50
+    funding_runway_months: 0  # Minimum months of funding
+
+  # Scoring components
+  research_similarity:
+    semantic_weight: 0.6
+    topic_overlap_weight: 0.25
+    technique_match_weight: 0.15
+
+  funding_status:
+    active_grants_weight: 0.4
+    total_funding_weight: 0.3
+    funding_diversity_weight: 0.2
+    grant_success_rate_weight: 0.1
+
+  productivity:
+    recent_publications_weight: 0.4
+    publication_quality_weight: 0.3
+    collaboration_rate_weight: 0.2
+    student_mentorship_weight: 0.1
+
+  recency:
+    time_decay_factor: 0.1  # Per year decay
+    max_years_considered: 10
+    recent_window_years: 3
+
+  # Match explanation
+  explanation:
+    generate_explanations: true
+    max_explanation_length: 500
+    include_specific_overlaps: true
+    highlight_risks: true
+
+vector_stores:
+  # FAISS configuration
+  faiss:
+    index_type: "IVF_PQ"  # Options: Flat, IVF, IVF_PQ, HNSW
+    nlist: 100  # Number of clusters for IVF
+    m: 8  # Number of sub-quantizers for PQ
+    nbits: 8  # Bits per sub-quantizer
+    use_gpu: false
+    metric: "cosine"  # Options: cosine, l2, inner_product
+
+  # Pinecone configuration
+  pinecone:
+    environment: "us-west1-gcp"
+    index_name: "biomatch-faculty"
+    dimension: 768
+    metric: "cosine"
+    pod_type: "p1.x1"
+
+  # Weaviate configuration
+  weaviate:
+    url: "http://localhost:8080"
+    class_name: "FacultyProfile"
+    distance_metric: "cosine"
+
+  # Primary vector store
+  primary: "faiss"
+
+  # Replication
+  replicate_to: ["pinecone"]  # Backup to cloud
+  sync_interval: 3600  # Sync every hour
+
+elasticsearch:
+  hosts: ["localhost:9200"]
+  index_prefix: "biomatch"
+
+  # Index settings
+  settings:
+    number_of_shards: 3
+    number_of_replicas: 1
+    refresh_interval: "30s"
+    max_result_window: 10000
+
+  # Mapping configurations
+  mappings:
+    faculty:
+      dynamic: "strict"
+      properties:
+        # Core fields
+        id: {type: "keyword"}
+        name: {type: "text", analyzer: "standard"}
+        institution: {type: "keyword"}
+        department: {type: "keyword"}
+        email: {type: "keyword"}
+
+        # Research content
+        research_summary:
+          type: "text"
+          analyzer: "bio_analyzer"
+          search_analyzer: "bio_search_analyzer"
+
+        research_interests: {type: "text", analyzer: "bio_analyzer"}
+        research_areas: {type: "keyword"}
+        techniques: {type: "keyword"}
+        organisms: {type: "keyword"}
+
+        # Embeddings
+        research_embedding:
+          type: "dense_vector"
+          dims: 768
+          index: true
+          similarity: "cosine"
+
+        # Metrics
+        h_index: {type: "integer"}
+        total_publications: {type: "integer"}
+        total_citations: {type: "integer"}
+        recent_publications_3y: {type: "integer"}
+
+        # Funding
+        active_grants: {type: "integer"}
+        total_funding: {type: "long"}
+        funding_agencies: {type: "keyword"}
+
+        # Lab info
+        lab_size: {type: "integer"}
+        accepting_students: {type: "boolean"}
+        career_stage: {type: "keyword"}
+
+        # Temporal
+        last_updated: {type: "date"}
+        first_publication_year: {type: "integer"}
+
+  # Custom analyzers for biology text
+  analysis:
+    analyzer:
+      bio_analyzer:
+        tokenizer: "standard"
+        filter:
+          - "lowercase"
+          - "bio_synonym"
+          - "english_stemmer"
+      bio_search_analyzer:
+        tokenizer: "standard"
+        filter:
+          - "lowercase"
+          - "bio_synonym"
+
+    filter:
+      bio_synonym:
+        type: "synonym_graph"
+        synonyms:
+          - "PCR, polymerase chain reaction"
+          - "CRISPR, clustered regularly interspaced short palindromic repeats"
+          - "RNA-seq, RNA sequencing"
+          - "ChIP-seq, chromatin immunoprecipitation sequencing"
+          - "NGS, next generation sequencing"
+          - "WB, western blot"
+          - "IF, immunofluorescence"
+          - "IHC, immunohistochemistry"
+      english_stemmer:
+        type: "stemmer"
+        language: "english"
+
+performance:
+  # Batch processing
+  batch_size:
+    embedding_generation: 32
+    vector_insertion: 1000
+    search_concurrent: 100
+
+  # Timeouts
+  timeouts:
+    search_request: 10  # seconds
+    embedding_generation: 30
+    index_operation: 60
+
+  # Caching
+  result_cache:
+    enabled: true
+    ttl: 1800  # 30 minutes
+    max_size: 1000
+
+  # Rate limiting
+  rate_limits:
+    search_per_minute: 100
+    embedding_per_minute: 1000
+    index_updates_per_minute: 500
+
+monitoring:
+  enable_metrics: true
+  metrics_port: 9090
+  log_level: "INFO"
+
+  # Track key metrics
+  tracked_metrics:
+    - search_latency_p50
+    - search_latency_p95
+    - search_latency_p99
+    - embedding_generation_time
+    - cache_hit_rate
+    - result_quality_score
+    - api_request_rate
+    - error_rate
+
+  # Alerting thresholds
+  alerts:
+    search_latency_p95_ms: 200
+    error_rate_percent: 5
+    cache_hit_rate_percent: 70

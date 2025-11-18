@@ -1,0 +1,236 @@
+version: '3.8'
+
+services:
+  # Main ML API service
+  ml-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: biomatch-ml-api
+    ports:
+      - "8001:8001"
+    environment:
+      - MODEL_CACHE=/app/models
+      - DATA_PATH=/app/data
+      - VECTOR_DB=faiss
+      - ES_HOST=elasticsearch:9200
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./configs:/app/configs
+    depends_on:
+      - elasticsearch
+      - redis
+    networks:
+      - biomatch-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # GPU-enabled ML API (optional)
+  ml-api-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gpu
+    container_name: biomatch-ml-api-gpu
+    ports:
+      - "8002:8001"
+    environment:
+      - MODEL_CACHE=/app/models
+      - DATA_PATH=/app/data
+      - VECTOR_DB=faiss
+      - ES_HOST=elasticsearch:9200
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - USE_GPU=true
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./configs:/app/configs
+    depends_on:
+      - elasticsearch
+      - redis
+    networks:
+      - biomatch-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+
+  # Elasticsearch for hybrid search
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: biomatch-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - biomatch-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: biomatch-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    networks:
+      - biomatch-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Weaviate vector database (optional)
+  weaviate:
+    image: semitechnologies/weaviate:latest
+    container_name: biomatch-weaviate
+    ports:
+      - "8080:8080"
+    environment:
+      - QUERY_DEFAULTS_LIMIT=25
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
+      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
+      - DEFAULT_VECTORIZER_MODULE=none
+      - CLUSTER_HOSTNAME=node1
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    networks:
+      - biomatch-network
+    restart: unless-stopped
+    profiles:
+      - weaviate
+
+  # PostgreSQL for metadata storage (optional)
+  postgres:
+    image: postgres:15-alpine
+    container_name: biomatch-postgres
+    environment:
+      - POSTGRES_USER=biomatch
+      - POSTGRES_PASSWORD=biomatch_password
+      - POSTGRES_DB=biomatch
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - biomatch-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U biomatch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - postgres
+
+  # Prometheus for monitoring (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: biomatch-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - biomatch-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: biomatch-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - biomatch-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Nginx reverse proxy (optional)
+  nginx:
+    image: nginx:alpine
+    container_name: biomatch-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./configs/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - ml-api
+    networks:
+      - biomatch-network
+    restart: unless-stopped
+    profiles:
+      - production
+
+networks:
+  biomatch-network:
+    driver: bridge
+
+volumes:
+  elasticsearch-data:
+    driver: local
+  redis-data:
+    driver: local
+  weaviate-data:
+    driver: local
+  postgres-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
