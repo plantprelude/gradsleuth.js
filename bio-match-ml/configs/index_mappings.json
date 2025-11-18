@@ -1,0 +1,192 @@
+{
+  "faculty_profiles": {
+    "settings": {
+      "number_of_shards": 3,
+      "number_of_replicas": 1,
+      "analysis": {
+        "analyzer": {
+          "bio_analyzer": {
+            "tokenizer": "standard",
+            "filter": [
+              "lowercase",
+              "bio_synonym",
+              "bio_stop",
+              "english_stemmer"
+            ]
+          },
+          "bio_search_analyzer": {
+            "tokenizer": "standard",
+            "filter": [
+              "lowercase",
+              "bio_synonym"
+            ]
+          }
+        },
+        "filter": {
+          "bio_synonym": {
+            "type": "synonym_graph",
+            "synonyms_path": "synonyms/bio_synonyms.txt"
+          },
+          "bio_stop": {
+            "type": "stop",
+            "stopwords": "_english_"
+          },
+          "english_stemmer": {
+            "type": "stemmer",
+            "language": "english"
+          }
+        }
+      }
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "id": {"type": "keyword"},
+        "name": {
+          "type": "text",
+          "analyzer": "standard",
+          "fields": {
+            "keyword": {"type": "keyword"}
+          }
+        },
+        "institution": {"type": "keyword"},
+        "department": {"type": "keyword"},
+        "email": {"type": "keyword"},
+        "research_summary": {
+          "type": "text",
+          "analyzer": "bio_analyzer",
+          "search_analyzer": "bio_search_analyzer"
+        },
+        "research_interests": {
+          "type": "text",
+          "analyzer": "bio_analyzer"
+        },
+        "research_areas": {"type": "keyword"},
+        "techniques": {"type": "keyword"},
+        "organisms": {"type": "keyword"},
+        "research_embedding": {
+          "type": "dense_vector",
+          "dims": 768,
+          "index": true,
+          "similarity": "cosine"
+        },
+        "publications": {
+          "type": "nested",
+          "properties": {
+            "pmid": {"type": "keyword"},
+            "title": {"type": "text"},
+            "year": {"type": "integer"},
+            "journal": {"type": "keyword"},
+            "citations": {"type": "integer"},
+            "mesh_terms": {"type": "keyword"}
+          }
+        },
+        "grants": {
+          "type": "nested",
+          "properties": {
+            "project_number": {"type": "keyword"},
+            "title": {"type": "text"},
+            "agency": {"type": "keyword"},
+            "total_cost": {"type": "long"},
+            "start_date": {"type": "date"},
+            "end_date": {"type": "date"},
+            "status": {"type": "keyword"}
+          }
+        },
+        "h_index": {"type": "integer"},
+        "total_publications": {"type": "integer"},
+        "total_citations": {"type": "integer"},
+        "recent_publications_3y": {"type": "integer"},
+        "active_grants": {"type": "integer"},
+        "total_funding": {"type": "long"},
+        "funding_agencies": {"type": "keyword"},
+        "lab_size": {"type": "integer"},
+        "accepting_students": {"type": "boolean"},
+        "career_stage": {"type": "keyword"},
+        "lab_website": {"type": "keyword"},
+        "last_updated": {"type": "date"},
+        "first_publication_year": {"type": "integer"}
+      }
+    }
+  },
+  "publications": {
+    "settings": {
+      "number_of_shards": 5,
+      "number_of_replicas": 1,
+      "analysis": {
+        "analyzer": {
+          "bio_analyzer": {
+            "tokenizer": "standard",
+            "filter": ["lowercase", "bio_synonym", "english_stemmer"]
+          }
+        }
+      }
+    },
+    "mappings": {
+      "properties": {
+        "pmid": {"type": "keyword"},
+        "doi": {"type": "keyword"},
+        "title": {
+          "type": "text",
+          "analyzer": "bio_analyzer",
+          "fields": {"keyword": {"type": "keyword"}}
+        },
+        "abstract": {
+          "type": "text",
+          "analyzer": "bio_analyzer"
+        },
+        "authors": {
+          "type": "nested",
+          "properties": {
+            "name": {"type": "text"},
+            "affiliation": {"type": "keyword"},
+            "is_corresponding": {"type": "boolean"}
+          }
+        },
+        "journal": {"type": "keyword"},
+        "year": {"type": "integer"},
+        "mesh_terms": {"type": "keyword"},
+        "keywords": {"type": "keyword"},
+        "citations": {"type": "integer"},
+        "title_embedding": {
+          "type": "dense_vector",
+          "dims": 768,
+          "index": true,
+          "similarity": "cosine"
+        },
+        "abstract_embedding": {
+          "type": "dense_vector",
+          "dims": 768,
+          "index": true,
+          "similarity": "cosine"
+        }
+      }
+    }
+  },
+  "grants": {
+    "settings": {
+      "number_of_shards": 2,
+      "number_of_replicas": 1
+    },
+    "mappings": {
+      "properties": {
+        "project_number": {"type": "keyword"},
+        "title": {"type": "text", "analyzer": "bio_analyzer"},
+        "abstract": {"type": "text", "analyzer": "bio_analyzer"},
+        "pi_name": {"type": "text"},
+        "pi_institution": {"type": "keyword"},
+        "agency": {"type": "keyword"},
+        "total_cost": {"type": "long"},
+        "start_date": {"type": "date"},
+        "end_date": {"type": "date"},
+        "status": {"type": "keyword"},
+        "abstract_embedding": {
+          "type": "dense_vector",
+          "dims": 768,
+          "index": true,
+          "similarity": "cosine"
+        }
+      }
+    }
+  }
+}

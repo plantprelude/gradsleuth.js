@@ -1,0 +1,101 @@
+# Model Configuration for BioMatch ML Infrastructure
+
+embedding_models:
+  pubmedbert:
+    model_name: "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext"
+    max_length: 512
+    batch_size: 32
+    use_gpu: true
+    pooling_strategy: "mean"
+    dimension: 768
+    cache_embeddings: true
+
+  biobert:
+    model_name: "dmis-lab/biobert-v1.1"
+    max_length: 512
+    batch_size: 32
+    use_gpu: true
+    pooling_strategy: "mean"
+    dimension: 768
+    cache_embeddings: true
+
+  scibert:
+    model_name: "allenai/scibert_scivocab_uncased"
+    max_length: 512
+    batch_size: 32
+    use_gpu: true
+    pooling_strategy: "mean"
+    dimension: 768
+    cache_embeddings: true
+
+  specter:
+    model_name: "allenai/specter"
+    max_length: 512
+    batch_size: 16
+    use_gpu: true
+    pooling_strategy: "cls"
+    dimension: 768
+    cache_embeddings: true
+
+  ensemble:
+    models: ["pubmedbert", "scibert"]
+    weights: [0.6, 0.4]
+    fusion_method: "weighted_average"  # Options: weighted_average, concatenation, attention
+
+  default: "pubmedbert"
+
+ner_models:
+  scispacy:
+    model_name: "en_ner_bc5cdr_md"
+    confidence_threshold: 0.7
+
+  biobert_ner:
+    model_name: "dmis-lab/biobert-base-cased-v1.2"
+    confidence_threshold: 0.75
+
+  hunflair:
+    model_name: "hunflair-paper-cellline"
+    confidence_threshold: 0.7
+
+  ensemble_ner: true
+  vote_threshold: 2  # Require 2 out of 3 models to agree
+
+classification_models:
+  research_area:
+    model_name: "allenai/scibert_scivocab_uncased"
+    num_labels: 50
+    multi_label: true
+    threshold: 0.3
+
+  technique_classifier:
+    model_name: "pubmedbert"
+    num_labels: 200
+    multi_label: true
+    threshold: 0.4
+
+model_optimization:
+  use_onnx: true
+  use_quantization: false  # Set to true for INT8 quantization
+  use_torchscript: false
+  use_gpu: true
+  mixed_precision: true
+  compile_model: false  # PyTorch 2.0 compile
+
+cache_config:
+  type: "redis"  # Options: redis, disk, memory, hybrid
+  redis_host: "localhost"
+  redis_port: 6379
+  redis_db: 0
+  ttl: 86400  # 24 hours
+  max_memory_items: 10000
+  disk_cache_path: "data/embedding_cache"
+
+training:
+  learning_rate: 2e-5
+  num_epochs: 3
+  warmup_steps: 500
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  eval_steps: 500
+  save_steps: 1000
+  logging_steps: 100
