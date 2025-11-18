@@ -1,13 +1,70 @@
-# Node
-node_modules
+# Dependencies
+node_modules/
 npm-debug.log
+yarn-debug.log
+yarn-error.log
+package-lock.json
 
-# Unneeded directories
-data
+# Environment variables
+.env
+.env.*
+!.env.example
 
-# Misc
-temp_assets
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# Build outputs
+dist/
+build/
+out/
+coverage/
+.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Project-specific
+data/
+temp_assets/
 test/jquery.js
-
-# Image files
 assets/img/gradsleuth_logo.ai
+
+# Future additions (ML/Python when added)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Models and large files (for future ML work)
+*.pkl
+*.h5
+*.hdf5
+*.model
+*.pt
+*.pth
