@@ -85,6 +85,8 @@ _embedding_generator = None
 _vector_store = None
 _search_engine = None
 _matcher = None
+_entity_recognizer = None
+_topic_classifier = None
 
 
 def get_embedding_generator():
@@ -107,6 +109,69 @@ def get_vector_store():
         _vector_store = FaissStore(use_gpu=False)
         logger.info("Initialized FaissStore")
     return _vector_store
+
+
+def get_entity_recognizer():
+    """Get or initialize entity recognizer"""
+    global _entity_recognizer
+    if _entity_recognizer is None:
+        from ..ner.bio_entity_recognizer import BioEntityRecognizer
+        _entity_recognizer = BioEntityRecognizer()
+        logger.info("Initialized BioEntityRecognizer")
+    return _entity_recognizer
+
+
+def get_topic_classifier():
+    """Get or initialize topic classifier"""
+    global _topic_classifier
+    if _topic_classifier is None:
+        from ..ner.research_topic_classifier import ResearchTopicClassifier
+        _topic_classifier = ResearchTopicClassifier()
+        logger.info("Initialized ResearchTopicClassifier")
+    return _topic_classifier
+
+
+def get_search_engine():
+    """Get or initialize semantic search engine"""
+    global _search_engine
+    if _search_engine is None:
+        from ..search.semantic_search import SemanticSearchEngine
+        from ..search.query_processor import QueryProcessor
+        from ..search.result_ranker import ResultRanker
+
+        embedder = get_embedding_generator()
+        store = get_vector_store()
+        entity_recognizer = get_entity_recognizer()
+        topic_classifier = get_topic_classifier()
+
+        query_processor = QueryProcessor(
+            entity_recognizer=entity_recognizer,
+            topic_classifier=topic_classifier
+        )
+        result_ranker = ResultRanker()
+
+        _search_engine = SemanticSearchEngine(
+            embedding_generator=embedder,
+            vector_store=store,
+            query_processor=query_processor,
+            result_ranker=result_ranker
+        )
+        logger.info("Initialized SemanticSearchEngine")
+    return _search_engine
+
+
+def get_matcher():
+    """Get or initialize multi-factor matcher"""
+    global _matcher
+    if _matcher is None:
+        from ..matching.multi_factor_scorer import MultiFactorMatcher
+        from ..matching.similarity_calculator import SimilarityCalculator
+
+        embedder = get_embedding_generator()
+        similarity_calc = SimilarityCalculator(embedding_generator=embedder)
+        _matcher = MultiFactorMatcher(similarity_calculator=similarity_calc)
+        logger.info("Initialized MultiFactorMatcher")
+    return _matcher
 
 
 # Health check endpoint
@@ -140,10 +205,14 @@ async def get_metrics():
 @app.post("/api/v1/search/semantic", response_model=SearchResponse)
 async def semantic_search(request: SearchRequest):
     """
-    Primary semantic search endpoint
+    Primary semantic search endpoint - NOW WITH INTELLIGENT SEARCH
 
-    Performs semantic search across faculty profiles, publications, grants, or labs
-    using state-of-the-art biology-specific embeddings.
+    Performs semantic search with:
+    - Query understanding & expansion
+    - Multi-factor ranking (not just vector similarity)
+    - Entity extraction & intent detection
+    - Faceted search
+    - Detailed explanations
 
     Args:
         request: Search request parameters
@@ -154,61 +223,45 @@ async def semantic_search(request: SearchRequest):
     try:
         logger.info(f"Search request: query='{request.query}', mode={request.mode}")
 
-        # Get embedding for query
-        generator = get_embedding_generator()
-        query_embedding = generator.generate_embedding(request.query)
+        # Get intelligent search engine
+        search_engine = get_search_engine()
 
-        # Get vector store
-        store = get_vector_store()
-
-        # Determine index name based on mode
-        index_name = f"{request.mode}_embeddings"
-
-        # Check if index exists
-        if index_name not in store.list_indices():
-            logger.warning(f"Index '{index_name}' not found, creating empty index")
-            store.create_index(index_name, dimension=768, metric='cosine')
-
-        # Perform search
-        results = store.search(
-            query_embedding,
-            index_name=index_name,
-            k=request.limit,
-            filters=request.filters
+        # Perform intelligent search
+        search_results = search_engine.search(
+            query=request.query,
+            search_mode=request.mode,
+            filters=request.filters,
+            limit=request.limit,
+            offset=request.offset,
+            explain=request.explain,
+            diversity_factor=0.3  # Promote diversity in results
         )
 
-        # Format results
+        # Format results for API response
         faculty_results = []
-        for result in results:
-            metadata = result['metadata']
+        for result in search_results.results:
+            metadata = result.get('metadata', {})
             faculty_results.append(
                 FacultyResult(
-                    id=result['id'],
+                    id=result.get('id', 'unknown'),
                     name=metadata.get('name', 'Unknown'),
                     institution=metadata.get('institution', 'Unknown'),
                     department=metadata.get('department', 'Unknown'),
                     research_summary=metadata.get('research_summary', ''),
-                    match_score=result['score'],
-                    explanation=f"Matched based on semantic similarity: {result['score']:.3f}" if request.explain else None
+                    match_score=result.get('final_score', result.get('score', 0)),
+                    explanation=result.get('ranking_explanation') if request.explain else None
                 )
             )
 
-        # Build response
+        # Build response with facets and query interpretation
         response = SearchResponse(
             results=faculty_results,
-            total=len(results),
-            facets={
-                "institutions": {},
-                "departments": {},
-                "research_areas": {}
-            } if request.explain else None,
-            query_interpretation={
-                "original_query": request.query,
-                "embedding_model": "pubmedbert"
-            } if request.explain else None
+            total=search_results.total_count,
+            facets=search_results.facets if request.explain else None,
+            query_interpretation=search_results.query_interpretation if request.explain else None
         )
 
-        logger.info(f"Returning {len(faculty_results)} results")
+        logger.info(f"Returning {len(faculty_results)} results (total: {search_results.total_count})")
         return response
 
     except Exception as e:
@@ -242,97 +295,127 @@ async def batch_search(requests: List[SearchRequest]):
 @app.post("/api/v1/match/calculate", response_model=MatchResponse)
 async def calculate_match(request: MatchRequest):
     """
-    Calculate matches for a student profile
+    Calculate matches for a student profile - NOW WITH INTELLIGENT MATCHING
 
-    Uses multi-factor scoring to find best faculty matches based on:
-    - Research similarity
-    - Funding status
-    - Productivity metrics
+    Uses comprehensive multi-factor scoring:
+    - Research alignment (semantic + topic/technique overlap)
+    - Funding stability (active grants, runway)
+    - Productivity compatibility
+    - Technique match with learning opportunities
+    - Lab environment (size, mentorship)
     - Career development potential
+
+    Generates explainable scores with specific strengths and considerations.
 
     Args:
         request: Match request with student profile
 
     Returns:
-        Ranked list of faculty matches with explanations
+        Ranked list of faculty matches with detailed explanations
     """
     try:
-        logger.info("Calculating matches for student profile")
+        logger.info("Calculating intelligent matches for student profile")
 
-        # Generate embedding for student profile
-        generator = get_embedding_generator()
+        # Get intelligent matcher
+        matcher = get_matcher()
 
-        # Combine student interests into single text
-        student_text = request.student_profile.get('research_interests', '')
-        if 'techniques' in request.student_profile:
-            student_text += " " + " ".join(request.student_profile['techniques'])
+        # First, use semantic search to find candidate faculty
+        search_engine = get_search_engine()
 
-        student_embedding = generator.generate_embedding(student_text)
+        # Create search query from student profile
+        query_text = request.student_profile.get('research_interests', '')
+        if 'topics' in request.student_profile:
+            query_text += " " + " ".join(request.student_profile['topics'])
 
-        # Search for similar faculty
-        store = get_vector_store()
-        index_name = "faculty_embeddings"
-
-        if index_name not in store.list_indices():
-            store.create_index(index_name, dimension=768)
-
-        search_results = store.search(
-            student_embedding,
-            index_name=index_name,
-            k=request.top_k
+        # Search for candidate faculty
+        search_results = search_engine.search(
+            query=query_text,
+            search_mode='faculty',
+            limit=request.top_k * 2,  # Get more candidates for ranking
+            explain=False
         )
 
-        # Build match results
+        # Calculate match scores for each faculty
         matches = []
-        for i, result in enumerate(search_results):
-            metadata = result['metadata']
+        for result in search_results.results[:request.top_k]:
+            metadata = result.get('metadata', {})
 
-            # Calculate component scores (simplified)
-            component_scores = {
-                'research_alignment': result['score'],
-                'funding_stability': 0.85,
-                'productivity': 0.80,
-                'lab_culture_fit': 0.75,
-                'career_development': 0.90
+            # Build faculty profile from metadata
+            faculty_profile = {
+                'id': result.get('id'),
+                'name': metadata.get('name', 'Unknown'),
+                'research_summary': metadata.get('research_summary', ''),
+                'topics': metadata.get('topics', []),
+                'techniques': metadata.get('techniques', []),
+                'organisms': metadata.get('organisms', []),
+                'h_index': metadata.get('h_index', 0),
+                'publication_count': metadata.get('publication_count', 0),
+                'active_grants': metadata.get('active_grants', 0),
+                'total_funding': metadata.get('total_funding', 0),
+                'grants': metadata.get('grants', []),
+                'lab_size': metadata.get('lab_size', 0),
+                'accepting_students': metadata.get('accepting_students', True),
+                'career_stage': metadata.get('career_stage', ''),
+                'collaborations': metadata.get('collaborations', 0),
+                'last_publication_year': metadata.get('last_publication_year', 0),
+                'recent_publications': metadata.get('recent_publications', 0),
+                'publications': metadata.get('publications', [])
             }
 
-            # Overall score
-            overall_score = np.mean(list(component_scores.values()))
-
-            # Generate explanation for top results
-            explanation = None
-            if i < request.explain_top_n:
-                explanation = f"Strong research alignment with similarity score of {result['score']:.3f}. Faculty has active funding and strong publication record."
+            # Calculate comprehensive match score
+            should_explain = len(matches) < request.explain_top_n
+            match_score = matcher.calculate_match_score(
+                request.student_profile,
+                faculty_profile,
+                explain=should_explain
+            )
 
             matches.append(
                 MatchResult(
-                    faculty_id=result['id'],
-                    faculty_name=metadata.get('name', 'Unknown'),
-                    overall_score=overall_score,
-                    component_scores=component_scores,
-                    explanation=explanation,
-                    strengths=[
-                        "High research similarity",
-                        "Active funding",
-                        "Strong mentorship record"
-                    ],
-                    considerations=[
-                        "Lab may be large",
-                        "Competitive application process"
-                    ]
+                    faculty_id=faculty_profile['id'],
+                    faculty_name=faculty_profile['name'],
+                    overall_score=match_score.overall_score,
+                    component_scores=match_score.component_scores,
+                    explanation=match_score.explanation if should_explain else None,
+                    strengths=match_score.strengths if should_explain else [],
+                    considerations=match_score.considerations if should_explain else []
                 )
             )
 
-        response = MatchResponse(
-            matches=matches,
-            student_profile_summary={
-                "research_areas": ["Molecular Biology", "Genetics"],
+        # Sort by overall score
+        matches.sort(key=lambda x: x.overall_score, reverse=True)
+
+        # Extract student profile summary
+        entity_recognizer = get_entity_recognizer()
+        topic_classifier = get_topic_classifier()
+
+        student_text = request.student_profile.get('research_interests', '')
+        try:
+            entities = entity_recognizer.extract_all_entities(student_text)
+            classification = topic_classifier.classify_research_area(student_text)
+
+            student_summary = {
+                "research_areas": [classification.get('primary_area', '')] + classification.get('secondary_areas', []),
                 "techniques": request.student_profile.get('techniques', []),
+                "organisms": [org['common_name'] if isinstance(org, dict) else org
+                             for org in entities.get('organisms', [])],
                 "career_goals": request.student_profile.get('career_goals', '')
             }
+        except Exception as e:
+            logger.warning(f"Could not extract student profile summary: {e}")
+            student_summary = {
+                "research_areas": [],
+                "techniques": request.student_profile.get('techniques', []),
+                "organisms": [],
+                "career_goals": request.student_profile.get('career_goals', '')
+            }
+
+        response = MatchResponse(
+            matches=matches,
+            student_profile_summary=student_summary
         )
 
-        logger.info(f"Returning {len(matches)} matches")
+        logger.info(f"Returning {len(matches)} intelligent matches")
         return response
 
     except Exception as e:
@@ -378,22 +461,29 @@ async def extract_entities(
     """
     Extract biological entities from text
 
+    Uses BioEntityRecognizer to extract:
+    - Genes and proteins
+    - Diseases
+    - Chemicals
+    - Organisms (model organisms)
+    - Techniques (experimental methods)
+    - Cell types and cell lines
+
     Args:
         text: Input text
         entity_types: Types of entities to extract
 
     Returns:
-        Extracted entities by type
+        Extracted entities by type with confidence scores
     """
     try:
-        from ..ner.bio_entity_recognizer import BioEntityRecognizer
-
-        recognizer = BioEntityRecognizer()
+        recognizer = get_entity_recognizer()
         entities = recognizer.extract_all_entities(text)
 
         return {
             "entities": entities,
-            "text_length": len(text)
+            "text_length": len(text),
+            "entity_counts": {k: len(v) for k, v in entities.items() if v}
         }
 
     except Exception as e:
@@ -447,13 +537,23 @@ async def find_similar_faculty(
 async def startup_event():
     """Initialize services on startup"""
     logger.info("Starting BioMatch API server...")
-    logger.info("Initializing services...")
+    logger.info("Initializing intelligent search and matching services...")
 
-    # Pre-load models
+    # Pre-load all models and systems
     try:
         get_embedding_generator()
         get_vector_store()
-        logger.info("Services initialized successfully")
+        get_entity_recognizer()
+        get_topic_classifier()
+        get_search_engine()
+        get_matcher()
+        logger.info("All services initialized successfully!")
+        logger.info("✓ Embedding generation")
+        logger.info("✓ Vector store")
+        logger.info("✓ Entity recognition")
+        logger.info("✓ Topic classification")
+        logger.info("✓ Semantic search engine")
+        logger.info("✓ Multi-factor matcher")
     except Exception as e:
         logger.error(f"Startup error: {e}")
 
